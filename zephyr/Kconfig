@@ -4,16 +4,55 @@
 menuconfig UHC_PIO_USB
 	bool "Pico-PIO-USB host controller"
 	depends on SOC_RP2040 && UHC_DRIVER
+	select PICOSDK_USE_PIO
+	select PICOSDK_USE_DMA
+	select PICOSDK_USE_GPIO
+	select PICOSDK_USE_TIMER
+	select PICOSDK_USE_CLAIM
 	help
 	  Enable the Zephyr UHC driver that wraps sekigon-gonnoc/Pico-PIO-USB
 	  in host mode. Owns PIO0 and consumes a D+/D- GPIO pair via the
 	  raspberrypi,pio-usb-host devicetree binding.
 
+if UHC_PIO_USB
+
+config UHC_PIO_USB_THREAD_STACK_SIZE
+	int "uhc_pio_usb driver thread stack size"
+	default 2048
+
+config UHC_PIO_USB_THREAD_PRIORITY
+	int "uhc_pio_usb driver thread priority"
+	default 8
+	help
+	  Cooperative-priority driver thread that polls Pico-PIO-USB endpoint
+	  completion bitmaps and routes results back through the Zephyr UHC
+	  event API. Should run above most application threads but below
+	  time-critical kernel work.
+
+endif # UHC_PIO_USB
+
 menuconfig UDC_PIO_USB
 	bool "Pico-PIO-USB device controller"
 	depends on SOC_RP2040 && UDC_DRIVER
+	select PICOSDK_USE_PIO
+	select PICOSDK_USE_DMA
+	select PICOSDK_USE_GPIO
+	select PICOSDK_USE_TIMER
+	select PICOSDK_USE_CLAIM
 	help
 	  Enable the Zephyr UDC driver that wraps sekigon-gonnoc/Pico-PIO-USB
 	  in device mode. Owns PIO0 and consumes a D+/D- GPIO pair via the
 	  raspberrypi,pio-usb-device devicetree binding. Mutually exclusive
 	  with UHC_PIO_USB at build time (one PIO instance, one program).
+
+if UDC_PIO_USB
+
+config UDC_PIO_USB_THREAD_STACK_SIZE
+	int "udc_pio_usb driver thread stack size"
+	default 2048
+
+config UDC_PIO_USB_THREAD_PRIORITY
+	int "udc_pio_usb driver thread priority"
+	default 8
+
+endif # UDC_PIO_USB
