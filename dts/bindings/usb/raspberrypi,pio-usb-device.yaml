@@ -17,19 +17,30 @@ compatible: "raspberrypi,pio-usb-device"
 include: base.yaml
 
 properties:
-  pinctrl-0:
+  pin-dp:
+    type: int
     required: true
     description: |
-      Pinctrl group selecting the consecutive D+/D- GPIO pair. D+ is the
-      lower-numbered pin; D- is D+ + 1.
+      RP2040 GPIO number of the D+ pin. D- must be on the adjacent GPIO —
+      either DP+1 or DP-1, selected by the `pinout` property. Pico-PIO-USB
+      drives both pins directly; do not configure them via pinctrl.
 
-  pinctrl-names:
-    required: true
+  pinout:
+    type: string
+    enum:
+      - "dpdm"
+      - "dmdp"
+    default: "dpdm"
+    description: |
+      Order of the D+/D- pin pair. "dpdm" means D- = DP + 1.
+      "dmdp" means D- = DP - 1.
 
   pio:
     type: phandle
-    required: true
-    description: PIO instance the device state machine programs run on.
+    description: |
+      PIO instance the device state machine programs run on. Optional —
+      Pico-PIO-USB hardcodes PIO0 today; this property is reserved for
+      future multi-PIO support and is currently informational only.
 
   data-rate:
     type: string
@@ -38,3 +49,14 @@ properties:
       - "low-speed"
     default: "full-speed"
     description: USB bus speed. Full-speed is the only well-tested mode.
+
+  pinctrl-0:
+    type: phandles
+    description: |
+      Optional pinctrl group. Pico-PIO-USB configures the D+/D- pins
+      itself; this property is provided for boards that want to reserve
+      the pins through the pinctrl framework. Most boards omit it.
+
+  pinctrl-names:
+    type: string-array
+    description: Required when pinctrl-0 is set.
