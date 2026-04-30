@@ -1,0 +1,19 @@
+# Copyright (c) 2026 The Cosmos-Keyboards Contributors
+# SPDX-License-Identifier: MIT
+
+menuconfig UHC_PIO_USB
+	bool "Pico-PIO-USB host controller"
+	depends on SOC_RP2040 && UHC_DRIVER
+	help
+	  Enable the Zephyr UHC driver that wraps sekigon-gonnoc/Pico-PIO-USB
+	  in host mode. Owns PIO0 and consumes a D+/D- GPIO pair via the
+	  raspberrypi,pio-usb-host devicetree binding.
+
+menuconfig UDC_PIO_USB
+	bool "Pico-PIO-USB device controller"
+	depends on SOC_RP2040 && UDC_DRIVER
+	help
+	  Enable the Zephyr UDC driver that wraps sekigon-gonnoc/Pico-PIO-USB
+	  in device mode. Owns PIO0 and consumes a D+/D- GPIO pair via the
+	  raspberrypi,pio-usb-device devicetree binding. Mutually exclusive
+	  with UHC_PIO_USB at build time (one PIO instance, one program).

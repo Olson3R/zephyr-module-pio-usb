@@ -1,0 +1,38 @@
+# Copyright (c) 2026 The Cosmos-Keyboards Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Pico-PIO-USB host controller. Bit-banged USB Full-Speed host on an RP2040
+  PIO state machine, exposed as a Zephyr UHC.
+
+  Phase 2 scaffold: the underlying driver is currently a stub that returns
+  -ENOSYS for all operations. The binding is published now so devicetrees
+  can reference it during integration work.
+
+compatible: "raspberrypi,pio-usb-host"
+
+include: base.yaml
+
+properties:
+  pinctrl-0:
+    required: true
+    description: |
+      Pinctrl group selecting the consecutive D+/D- GPIO pair. D+ is the
+      lower-numbered pin; D- is D+ + 1. Pico-PIO-USB requires the two pins
+      be adjacent.
+
+  pinctrl-names:
+    required: true
+
+  pio:
+    type: phandle
+    required: true
+    description: PIO instance the host state machine programs run on.
+
+  data-rate:
+    type: string
+    enum:
+      - "full-speed"
+      - "low-speed"
+    default: "full-speed"
+    description: USB bus speed. Full-speed is the only well-tested mode.
