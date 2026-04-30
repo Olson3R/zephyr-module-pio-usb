@@ -52,6 +52,7 @@
 /* Pico-PIO-USB headers (from the upstream module via west import).
  * pio_usb_ll.h declares the host endpoint functions, root-port macros,
  * and EP pool macros — pio_usb.h alone only exports init/task/stop. */
+#include <hardware/structs/timer.h>
 #include "pio_usb.h"
 #include "pio_usb_configuration.h"
 #include "pio_usb_ll.h"
@@ -432,6 +433,7 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
+	uint32_t loop_count = 0;
 	while (!priv->stop) {
 		/* Wait at most 1 ms — long enough to behave like the
 		 * upstream SOF cadence, short enough to react to ep_enqueue
@@ -442,12 +444,40 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
+		/* Print on every iteration once any transfer has been kicked
+		 * off so we can see exactly which call hangs the loop, and
+		 * a heartbeat every 50 ticks otherwise. */
+		endpoint_t *e0 = PIO_USB_ENDPOINT(0);
+		bool any_started = false;
+		for (size_t i = 0; i < ARRAY_SIZE(priv->inflight); i++) {
+			if (priv->inflight[i].started) {
+				any_started = true;
+				break;
+			}
+		}
+		bool probe = any_started || ((loop_count % 50) == 0);
+		if (probe) {
+			printk("[uhc] iter=%u t=%u ints=0x%x epc=0x%x epe=0x%x ep0(s=%u n=0x%02x d=0x%02x h=%u st=%u f=%u)\n",
+			       loop_count, timer_hw->timerawl,
+			       root->ints, root->ep_complete, root->ep_error,
+			       e0->size, e0->ep_num, e0->data_id,
+			       e0->has_transfer, e0->transfer_started,
+			       e0->failed_count);
+		}
+		loop_count++;
+
 		/* Pico-PIO-USB normally calls pio_usb_host_frame() from its
 		 * SOF timer; since we set skip_alarm_pool=true, we drive it
 		 * here. This sends SOF, processes queued endpoint
 		 * transactions, runs the connection-check pass, and invokes
 		 * pio_usb_host_irq_handler for any flagged root ports. */
+		if (probe) {
+			printk("[uhc] frame_in\n");
+		}
 		pio_usb_host_frame();
+		if (probe) {
+			printk("[uhc] frame_out\n");
+		}
 
 		/* Surface connect/disconnect and per-endpoint completions
 		 * back through the UHC event API. */
