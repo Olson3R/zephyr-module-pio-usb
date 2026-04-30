@@ -23,34 +23,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* --- Time queries ----------------------------------------------------- */
+#include "pico/time.h"
 
-uint32_t get_time_us_32(void)
-{
-	/* Zephyr's k_uptime_get_32 returns ms; we need us. Use the cycle
-	 * counter when available, falling back to the lower-resolution path
-	 * otherwise. Pico-PIO-USB only uses this for short timeouts (≤7 us)
-	 * so the resolution matters more than the absolute value. */
-	uint64_t cyc = k_cycle_get_32();
-	return k_cyc_to_us_floor32((uint32_t)cyc);
-}
+/* Note: pico-sdk's get_time_us_32() function is shadowed inside
+ * Pico-PIO-USB by a macro in usb_crc.h that reads timer_hw->timerawl
+ * directly (the RP2040 system timer). That register is exposed via
+ * hardware/structs/timer.h from hal_rpi_pico. We therefore don't need
+ * to provide get_time_us_32() ourselves. */
 
 /* --- Busy waits ------------------------------------------------------- */
-
-void busy_wait_us(uint32_t delay_us)
-{
-	k_busy_wait(delay_us);
-}
-
-void busy_wait_us_32(uint32_t delay_us)
-{
-	k_busy_wait(delay_us);
-}
-
-void busy_wait_ms(uint32_t delay_ms)
-{
-	k_busy_wait(delay_ms * 1000U);
-}
+/* busy_wait_us / _us_32 / _ms come from hal_rpi_pico's hardware_timer
+ * (provided when CONFIG_PICOSDK_USE_TIMER=y). Only busy_wait_at_least_cycles
+ * is missing — that one isn't in pico-sdk's hardware_timer either,
+ * Pico-PIO-USB references it from src/pio_usb.c. */
 
 void busy_wait_at_least_cycles(uint32_t minimum_cycles)
 {
@@ -62,23 +47,10 @@ void busy_wait_at_least_cycles(uint32_t minimum_cycles)
 }
 
 /* --- Alarm pool / repeating timer stubs ------------------------------- */
-
-/* Match the upstream type layout closely enough that Pico-PIO-USB's
- * static `repeating_timer_t sof_rt` allocates the right size. None of
- * the fields are touched by the UHC driver — pio_usb_host_init's
- * start_timer() calls add_repeating_timer_us with this struct, our stub
- * here does nothing, and our 1 ms work loop drives pio_usb_host_frame()
- * instead. */
-
-typedef struct alarm_pool alarm_pool_t;
-
-typedef struct repeating_timer {
-	int64_t delay_us;
-	bool (*callback)(struct repeating_timer *rt);
-	void *user_data;
-	void *pool;
-	void *alarm_id;
-} repeating_timer_t;
+/* Pico-PIO-USB's static `repeating_timer_t sof_rt` allocates with the
+ * struct layout declared in pico/time.h. The driver thread drives
+ * pio_usb_host_frame() itself on a 1 ms work loop, so the alarm-pool
+ * timer never needs to fire — the stubs here just satisfy linkage. */
 
 alarm_pool_t *alarm_pool_create(uint32_t hardware_alarm_num, uint32_t max_timers)
 {

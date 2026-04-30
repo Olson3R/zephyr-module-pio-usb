@@ -48,10 +48,12 @@ properties:
     description: USB bus speed. Full-speed is the only well-tested mode.
 
   pinctrl-0:
+    type: phandles
     description: |
       Optional pinctrl group. Pico-PIO-USB configures the D+/D- pins
       itself; this property is provided for boards that want to reserve
       the pins through the pinctrl framework. Most boards omit it.
 
   pinctrl-names:
+    type: string-array
     description: Required when pinctrl-0 is set.

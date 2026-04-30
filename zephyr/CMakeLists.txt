@@ -5,11 +5,26 @@ if(NOT (CONFIG_UHC_PIO_USB OR CONFIG_UDC_PIO_USB))
   return()
 endif()
 
-# Pico-PIO-USB upstream sources live in modules/lib/pico-pio-usb (pulled in
-# by west). The .pio.h files are pre-generated and shipped in src/ so we
-# don't need pioasm.
-set(PIO_USB_DIR ${ZEPHYR_PICO_PIO_USB_MODULE_DIR}/src)
+# Pico-PIO-USB upstream sources live alongside this wrapper in
+# modules/lib/pico-pio-usb (pulled in by west). It doesn't ship a
+# zephyr/module.yml, so it's not visible via the standard
+# ZEPHYR_<MOD>_MODULE_DIR variable — we resolve its path relative to this
+# wrapper's location instead. The .pio.h files are pre-generated and
+# shipped in src/ so we don't need pioasm.
+set(PIO_USB_DIR ${CMAKE_CURRENT_LIST_DIR}/../../pico-pio-usb/src)
+if(NOT EXISTS ${PIO_USB_DIR}/pio_usb.h)
+  message(FATAL_ERROR
+    "Pico-PIO-USB upstream not found at ${PIO_USB_DIR}. "
+    "Is sekigon-gonnoc/Pico-PIO-USB declared at modules/lib/pico-pio-usb "
+    "in your west manifest?")
+endif()
 zephyr_include_directories(${PIO_USB_DIR})
+
+# Shim headers for pico-sdk umbrella headers (pico/stdlib.h, pico/bootrom.h)
+# that hal_rpi_pico doesn't ship. The shim pulls in only what Pico-PIO-USB
+# actually needs (the individual hardware/* headers), keeping pico_runtime /
+# pico_stdio / pico_time out of the binary.
+zephyr_include_directories(${CMAKE_CURRENT_LIST_DIR}/shim)
 
 # Each driver compiles the relevant Pico-PIO-USB sources into its own
 # zephyr_library inside the subdirectory below — pio_usb_host.c for UHC,

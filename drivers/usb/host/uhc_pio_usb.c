@@ -49,9 +49,12 @@
  * via the include path added in zephyr/CMakeLists.txt. */
 #include "uhc_common.h"
 
-/* Pico-PIO-USB headers (from the upstream module via west import). */
+/* Pico-PIO-USB headers (from the upstream module via west import).
+ * pio_usb_ll.h declares the host endpoint functions, root-port macros,
+ * and EP pool macros — pio_usb.h alone only exports init/task/stop. */
 #include "pio_usb.h"
 #include "pio_usb_configuration.h"
+#include "pio_usb_ll.h"
 #include "usb_definitions.h"
 
 LOG_MODULE_REGISTER(uhc_pio_usb, CONFIG_UHC_DRIVER_LOG_LEVEL);
