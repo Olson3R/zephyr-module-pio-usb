@@ -14,7 +14,9 @@ description: |
 
 compatible: "raspberrypi,pio-usb-device"
 
-include: base.yaml
+# Pulls in `bus: usb` so child nodes (e.g. zephyr,cdc-acm-uart) pass
+# their `DT_INST_ON_BUS(n, usb)` BUILD_ASSERT.
+include: usb-controller.yaml
 
 properties:
   pin-dp:

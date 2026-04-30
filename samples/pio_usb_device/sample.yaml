@@ -1,0 +1,10 @@
+sample:
+  name: Pico-PIO-USB UDC standalone
+  description: |
+    Brings up udc_pio_usb on a Lemon Wired and exposes a CDC ACM device
+    on the configured Link USB-C port. Pair with samples/pio_usb_host/
+    on a second Lemon for an end-to-end test.
+tests:
+  sample.zephyr-module-pio-usb.device:
+    platform_allow: cosmos_lemon_wired rpi_pico
+    tags: usb pio

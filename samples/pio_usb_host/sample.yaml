@@ -1,0 +1,11 @@
+sample:
+  name: Pico-PIO-USB UHC standalone
+  description: |
+    Brings up uhc_pio_usb on a Lemon Wired (or any RP2040 board) and
+    logs UHC connect/disconnect events for any device plugged into the
+    configured Link USB-C port. Pair with samples/pio_usb_device for an
+    end-to-end Lemon-to-Lemon test.
+tests:
+  sample.zephyr-module-pio-usb.host:
+    platform_allow: cosmos_lemon_wired rpi_pico
+    tags: usb pio

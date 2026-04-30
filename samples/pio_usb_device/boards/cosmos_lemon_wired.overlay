@@ -1,0 +1,33 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Lemon Wired overlay for the UDC sample. The Link USB-C port (D+ on
+ * GP0, D- on GP1) drives Pico-PIO-USB in device mode.
+ *
+ * &uart0 owns GP0/GP1 by default for the wired-split transport — we
+ * disable it here so Pico-PIO-USB can take the pins. The board's
+ * native USBD stays available but isn't used by this sample.
+ */
+
+&uart0 {
+	status = "disabled";
+};
+
+/ {
+	pio_usb_device: pio_usb_device {
+		compatible = "raspberrypi,pio-usb-device";
+		pin-dp = <0>;
+		pinout = "dpdm";
+		data-rate = "full-speed";
+		status = "okay";
+	};
+};
+
+/* CDC ACM endpoint child node — Zephyr's USBD CDC ACM class searches
+ * for nodes with this compatible to instantiate a UART instance. The
+ * label `cdc_acm_uart0` is what the sample's main.c references. */
+&pio_usb_device {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
