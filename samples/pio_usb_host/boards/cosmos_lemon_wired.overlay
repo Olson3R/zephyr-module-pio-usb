@@ -21,4 +21,19 @@
 		data-rate = "full-speed";
 		status = "okay";
 	};
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
+	};
+};
+
+/* CDC ACM serial console exposed on the native USB-C port (RP2040's
+ * hardware USB block — board's `zephyr_udc0`). The Zephyr legacy USB
+ * stack instantiates one CDC ACM UART per zephyr,cdc-acm-uart child
+ * node of an enabled USB controller. */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
 };

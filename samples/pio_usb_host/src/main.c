@@ -24,6 +24,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/usb/uhc.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -32,8 +33,28 @@
 LOG_MODULE_REGISTER(pio_usb_host_sample, LOG_LEVEL_DBG);
 
 #define UHC_NODE DT_NODELABEL(pio_usb_host)
+#define CONSOLE_NODE DT_CHOSEN(zephyr_console)
 
 static const struct device *uhc_dev = DEVICE_DT_GET(UHC_NODE);
+static const struct device *console = DEVICE_DT_GET(CONSOLE_NODE);
+
+/* Wait until the host opens the CDC ACM port (asserts DTR) so the boot
+ * logs aren't dropped into a buffer that nobody's reading yet. Time out
+ * after ~3s so the sample still does work even if no console is
+ * attached. */
+static void wait_for_console(void)
+{
+	uint32_t dtr = 0;
+	for (int i = 0; i < 30; i++) {
+		printk("wfc i=%d dtr=%u\n", i, dtr);
+		uart_line_ctrl_get(console, UART_LINE_CTRL_DTR, &dtr);
+		if (dtr) {
+			break;
+		}
+		k_msleep(100);
+	}
+	k_msleep(200);
+}
 
 /* Global flag: a device is connected and we should send a descriptor
  * fetch on the next loop iteration. The UHC event callback runs in the
@@ -92,18 +113,24 @@ int main(void)
 {
 	int ret;
 
+	printk("\n*** MAIN_START ***\n");
+	wait_for_console();
+	printk("*** wait_for_console done ***\n");
+
 	LOG_INF("Pico-PIO-USB host sample starting");
 
 	if (!device_is_ready(uhc_dev)) {
 		LOG_ERR("UHC device %s not ready", uhc_dev->name);
 		return -ENODEV;
 	}
+	LOG_INF("UHC device %s present", uhc_dev->name);
 
 	ret = uhc_init(uhc_dev, uhc_event);
 	if (ret) {
 		LOG_ERR("uhc_init failed: %d", ret);
 		return ret;
 	}
+	LOG_INF("uhc_init OK");
 
 	ret = uhc_enable(uhc_dev);
 	if (ret) {
@@ -115,12 +142,11 @@ int main(void)
 
 	/* Periodically probe: if a device just connected, perform a bus
 	 * reset (required before issuing any transfers, per USB 2.0
-	 * §9.1.2) and log progress. We don't issue an explicit
-	 * GET_DESCRIPTOR(DEVICE) here because that needs a net_buf pool
-	 * + endpoint allocation that the USB host stack normally manages
-	 * — for this sample, surfacing the connect/reset path is enough
-	 * to confirm the controller is alive. */
+	 * §9.1.2) and log progress. Always emit a heartbeat every 2s so
+	 * the host can confirm the firmware is alive even when no device
+	 * is connected. */
 	bool reset_done = false;
+	uint32_t tick = 0;
 	while (1) {
 		if (atomic_get(&connected) && !reset_done) {
 			LOG_INF("Issuing bus reset...");
@@ -133,6 +159,11 @@ int main(void)
 		} else if (!atomic_get(&connected)) {
 			reset_done = false;
 		}
+		if ((tick % 4) == 0) {
+			LOG_INF("alive t=%us link=%s", tick / 2,
+				atomic_get(&connected) ? "connected" : "idle");
+		}
+		tick++;
 		k_msleep(500);
 	}
 

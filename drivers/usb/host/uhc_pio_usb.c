@@ -57,6 +57,40 @@
 #include "pio_usb_ll.h"
 #include "usb_definitions.h"
 
+/* Strong override of Pico-PIO-USB's pio_usb_host_irq_handler weak
+ * alias. Same trick udc_pio_usb uses for the device side.
+ *
+ * The upstream __pio_usb_host_irq_handler calls handle_endpoint_irq
+ * which iterates root->ep_complete/error/stalled, looks up each
+ * endpoint's owning device in pio_usb_device[], processes only
+ * completions for matched devices, and UNCONDITIONALLY CLEARS all
+ * bits at the end — even when no device was matched. We don't
+ * populate pio_usb_device[] (Zephyr's USB host stack tracks
+ * devices, not Pico-PIO-USB), so the upstream handler swallows
+ * every completion bit before our drain_endpoint_bitmap can see it.
+ *
+ * Our override only translates connect/disconnect ints into
+ * root->event (so surface_root_events can route them to the UHC
+ * stack) and leaves the per-endpoint bits intact for our driver
+ * thread's drain pass. */
+void pio_usb_host_irq_handler(uint8_t root_id)
+{
+	root_port_t *root = PIO_USB_ROOT_PORT(root_id);
+	const uint32_t ints = root->ints;
+
+	if (ints & PIO_USB_INTS_CONNECT_BITS) {
+		root->event = EVENT_CONNECT;
+	}
+	if (ints & PIO_USB_INTS_DISCONNECT_BITS) {
+		root->event = EVENT_DISCONNECT;
+	}
+
+	/* Clear only the connect/disconnect bits; leave ENDPOINT_COMPLETE
+	 * / STALLED / ERROR bits (and their per-endpoint counterparts in
+	 * ep_complete/ep_stalled/ep_error) for our drain pass. */
+	root->ints &= ~(PIO_USB_INTS_CONNECT_BITS | PIO_USB_INTS_DISCONNECT_BITS);
+}
+
 LOG_MODULE_REGISTER(uhc_pio_usb, CONFIG_UHC_DRIVER_LOG_LEVEL);
 
 /* PICO_NO_HARDWARE / __no_inline_not_in_flash_func / __not_in_flash etc come
@@ -260,6 +294,10 @@ static void drain_endpoint_bitmap(const struct device *dev,
 				  int err)
 {
 	uint32_t pending = *ep_reg;
+	if (pending) {
+		printk("[uhc] drain_endpoint_bitmap pending=0x%08x err=%d\n",
+		       pending, err);
+	}
 	*ep_reg &= ~pending;
 
 	while (pending) {
@@ -300,9 +338,13 @@ static void drain_endpoint_bitmap(const struct device *dev,
 static int kick_off_xfer(struct uhc_pio_usb_inflight *slot,
 			 struct uhc_transfer *xfer)
 {
+	printk("[uhc] kick_off_xfer dev=%u ep=0x%02x stage=%u\n",
+	       slot->dev_addr, slot->ep_addr, xfer->stage);
 	if (!ensure_endpoint_open(slot, xfer)) {
+		printk("[uhc] ensure_endpoint_open FAILED\n");
 		return -EIO;
 	}
+	printk("[uhc] endpoint open OK\n");
 
 	uint8_t ep_idx = xfer->ep & 0x0f;
 	if (ep_idx == 0) {
@@ -312,10 +354,13 @@ static int kick_off_xfer(struct uhc_pio_usb_inflight *slot,
 		 * current stage. */
 		switch (xfer->stage) {
 		case UHC_CONTROL_STAGE_SETUP:
+			printk("[uhc] sending SETUP packet\n");
 			if (!pio_usb_host_send_setup(0, slot->dev_addr,
 						     xfer->setup_pkt)) {
+				printk("[uhc] pio_usb_host_send_setup FAILED\n");
 				return -EIO;
 			}
+			printk("[uhc] SETUP queued\n");
 			break;
 		case UHC_CONTROL_STAGE_DATA:
 			if (!pio_usb_host_endpoint_transfer(
