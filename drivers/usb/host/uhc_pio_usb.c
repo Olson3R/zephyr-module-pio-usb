@@ -451,6 +451,18 @@ static int uhc_pio_usb_init(const struct device *dev)
 
 	(void)pio_usb_host_init(&pio_cfg);
 
+	/* pio_usb_host_init configures the PIO state machines but doesn't
+	 * mark any root port as initialized — pio_usb_host_frame's
+	 * connection-detection loop only runs for ports with
+	 * root->initialized == true. Add the root port now so the bus
+	 * actually starts polling for connect events. */
+	if (pio_usb_host_add_port(cfg->pin_dp,
+				  cfg->pinout_dpdm ? PIO_USB_PINOUT_DPDM
+						   : PIO_USB_PINOUT_DMDP) != 0) {
+		LOG_ERR("pio_usb_host_add_port failed");
+		return -EIO;
+	}
+
 	priv->initialized = true;
 	priv->enabled = false;
 	priv->stop = false;
@@ -469,6 +481,14 @@ static int uhc_pio_usb_init(const struct device *dev)
 	return 0;
 }
 
+/* NOTE: we don't call pio_usb_host_restart / pio_usb_host_stop here.
+ * Both busy-wait on flags (start_timer_flag / cancel_timer_flag) that
+ * are only cleared by Pico-PIO-USB's SOF timer callback — but we
+ * stubbed out the alarm pool, so that callback never runs and the
+ * busy-wait would hang forever. Our driver thread directly calls
+ * pio_usb_host_frame() and gates SOF generation on priv->enabled, so
+ * we don't need the upstream start/stop dance. */
+
 static int uhc_pio_usb_enable(const struct device *dev)
 {
 	struct uhc_pio_usb_data_priv *priv = uhc_get_private(dev);
@@ -477,7 +497,6 @@ static int uhc_pio_usb_enable(const struct device *dev)
 		return -EPERM;
 	}
 	priv->enabled = true;
-	pio_usb_host_restart();
 	k_sem_give(&priv->queue_sem);
 	return 0;
 }
@@ -487,7 +506,6 @@ static int uhc_pio_usb_disable(const struct device *dev)
 	struct uhc_pio_usb_data_priv *priv = uhc_get_private(dev);
 
 	priv->enabled = false;
-	pio_usb_host_stop();
 	return 0;
 }
 
@@ -497,7 +515,6 @@ static int uhc_pio_usb_shutdown(const struct device *dev)
 
 	priv->enabled = false;
 	priv->stop = true;
-	pio_usb_host_stop();
 	k_sem_give(&priv->queue_sem);
 	k_thread_join(&priv->thread, K_MSEC(100));
 	priv->initialized = false;
