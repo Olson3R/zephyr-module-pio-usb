@@ -7,6 +7,19 @@
  * registers itself for any DT node with compatible "raspberrypi,pio-usb-device"
  * but does not yet drive the hardware. Real implementation lands in a
  * follow-up PR.
+ *
+ * Architecture (decided 2026-04-29; see README.md "Architecture"):
+ *
+ * The real driver wraps the Pico-PIO-USB **LL layer** (pio_usb_ll_*)
+ * directly, NOT pio_usb_device_*. Pico-PIO-USB's device stack owns EP0
+ * and answers standard descriptor requests internally from the
+ * usb_descriptor_buffers_t handed at pio_usb_device_init — but Zephyr's
+ * USB device stack builds descriptors dynamically and expects the
+ * controller to surface raw SETUP packets via
+ *   udc_submit_event(..., UDC_EVT_EP_REQUEST).
+ * The two enumeration state machines would fight, so we skip
+ * pio_usb_device.c entirely (CMake omits it from device-mode builds) and
+ * own ~150 LOC of EP0 SETUP routing here.
  */
 
 #define DT_DRV_COMPAT raspberrypi_pio_usb_device

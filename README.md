@@ -8,11 +8,25 @@ Phase 2 of the [Cosmos Lemon Wired ZMK roadmap](https://github.com/Olson3R/Cosmo
 
 **Phase 2 scaffold.** Driver shims compile but return `-ENOSYS`. The host (`uhc_pio_usb`) and device (`udc_pio_usb`) drivers, DT bindings, and standalone sample apps will land in subsequent PRs.
 
-| Driver | Status |
-|---|---|
-| `uhc_pio_usb` (host) | Stub |
-| `udc_pio_usb` (device) | Stub |
-| `samples/pio_usb_host/` | Not yet present |
+| Driver | Status | Wraps |
+|---|---|---|
+| `uhc_pio_usb` (host) | Stub | Pico-PIO-USB **host stack** (`pio_usb_host_*`) |
+| `udc_pio_usb` (device) | Stub | Pico-PIO-USB **LL layer** (`pio_usb_ll_*`) directly |
+| `samples/pio_usb_host/` | Not yet present | — |
+
+## Architecture
+
+Pico-PIO-USB has three layers (~6000 LOC total):
+
+- **LL layer** (`pio_usb.c` + `pio_usb_ll.h` + `pio_usb.h`) — PIO programs, packet send/receive, endpoint object management, IRQ handling. ~3500 LOC of timing-critical bit-banging.
+- **Host stack** (`pio_usb_host.c`) — root-port management, `pio_usb_host_init/task`, endpoint open/transfer/setup. ~800 LOC built on LL.
+- **Device stack** (`pio_usb_device.c`) — owns EP0; parses standard SETUP requests and answers them from a `usb_descriptor_buffers_t` handed at `pio_usb_device_init`. ~600 LOC built on LL.
+
+This module wraps the **host stack** for UHC because Zephyr UHC's contract ("open endpoint, queue transfer, get completion event") matches that layer 1:1.
+
+For UDC it wraps the **LL layer directly**, *not* `pio_usb_device_*`. Zephyr's USB device stack builds descriptors dynamically and expects the controller to surface raw SETUP packets via `udc_submit_event(..., UDC_EVT_EP_REQUEST)` — the Pico-PIO-USB device stack would compete with that by answering descriptor requests itself. The UDC driver owns its own ~150 LOC of EP0 SETUP routing instead, and the wrapper's CMake omits `pio_usb_device.c` from device-mode builds.
+
+This keeps us tracking upstream Pico-PIO-USB at the LL + host levels for the hard part (timing fixes, packet encoding) while owning a small, focused glue layer that fits Zephyr's contracts.
 
 ## How to consume
 
