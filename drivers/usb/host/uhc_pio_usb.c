@@ -293,10 +293,9 @@ static void surface_root_events(const struct device *dev,
 static int kick_stage(struct uhc_pio_usb_inflight *slot,
 		      struct uhc_transfer *xfer)
 {
-	printk("[uhc] kick dev=%u ep=0x%02x stage=%u\n",
-	       slot->dev_addr, xfer->ep, xfer->stage);
+	LOG_DBG("kick dev=%u ep=0x%02x stage=%u",
+		slot->dev_addr, xfer->ep, xfer->stage);
 	if (!ensure_endpoint_open(slot, xfer)) {
-		printk("[uhc] endpoint_open FAILED\n");
 		return -EIO;
 	}
 
@@ -363,9 +362,6 @@ static void drain_endpoint_bitmap(const struct device *dev,
 				  int err)
 {
 	uint32_t pending = *ep_reg;
-	if (pending) {
-		printk("[uhc] drain pending=0x%x err=%d\n", pending, err);
-	}
 	*ep_reg &= ~pending;
 
 	while (pending) {
@@ -496,8 +492,6 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	uint32_t one_shot_remaining = 0;
-	bool prev_any_started = false;
 	while (!priv->stop) {
 		/* Wait at most 1 ms — long enough to behave like the
 		 * upstream SOF cadence, short enough to react to ep_enqueue
@@ -508,34 +502,12 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		/* One-shot probe: when slot->started flips from false to
-		 * true (i.e. we just queued the first transfer of a chain),
-		 * arm a tiny burst (frame_in, frame_out) bracket on the
-		 * next few frame() calls. Lets us see whether
-		 * pio_usb_host_frame() hangs pumping the queued
-		 * transaction. Per-iteration printing is OFF — even small
-		 * lines at 1 ms cadence overflow the deferred log buffer
-		 * (or back-pressure CDC ACM in IMMEDIATE mode). */
-		bool any_started = false;
-		for (size_t i = 0; i < ARRAY_SIZE(priv->inflight); i++) {
-			if (priv->inflight[i].started) {
-				any_started = true;
-				break;
-			}
-		}
-		if (any_started && !prev_any_started) {
-			one_shot_remaining = 3;
-		}
-		prev_any_started = any_started;
-
-		if (one_shot_remaining > 0) {
-			printk("[uhc] frame_in n=%u\n", one_shot_remaining);
-		}
+		/* Pico-PIO-USB normally calls pio_usb_host_frame() from its
+		 * SOF timer; we set skip_alarm_pool=true at init and drive
+		 * it here. This sends SOF, processes queued endpoint
+		 * transactions, runs the connection-check pass, and invokes
+		 * pio_usb_host_irq_handler for any flagged root ports. */
 		pio_usb_host_frame();
-		if (one_shot_remaining > 0) {
-			printk("[uhc] frame_out n=%u\n", one_shot_remaining);
-			one_shot_remaining--;
-		}
 
 		/* Surface connect/disconnect and per-endpoint completions
 		 * back through the UHC event API. */
