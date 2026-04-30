@@ -33,6 +33,14 @@ zephyr_include_directories(${CMAKE_CURRENT_LIST_DIR}/shim)
 # hal_rpi_pico doesn't ship.
 set(PIO_USB_GLUE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
+# Pico-PIO-USB marks bit-timing-sensitive functions with
+# __not_in_flash_func / __time_critical_func so they execute from RAM
+# rather than XIP flash — without this fragment USB packet timing breaks
+# under flash-cache-miss latency. hal_rpi_pico ships an equivalent
+# fragment but only enables it when CONFIG_PICOSDK_USE_FLASH=y, so we
+# always pull ours in when either driver is enabled.
+zephyr_linker_sources(RWDATA timecritical.ld)
+
 if(CONFIG_UHC_PIO_USB)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../drivers/usb/host host)
 endif()
