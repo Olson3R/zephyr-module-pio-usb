@@ -3,129 +3,100 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Pico-PIO-USB device standalone sample. Brings up udc_pio_usb on a
- * Lemon Wired and registers a CDC ACM device on top of it via Zephyr's
- * USBD-next stack.
+ * Pico-PIO-USB device standalone triage. Brings up udc_pio_usb on the
+ * Link USB-C port and waits — no USBD-next class on top, just confirm
+ * the driver init sequence reaches steady state without faulting and
+ * the PIO-USB device-mode signaling holds D+ high so a host (or our
+ * UHC sample on a second Lemon) sees the line in FS_IDLE.
  *
- * Plug the Lemon's Link USB-C port into a host computer (or into a
- * second Lemon flashed with samples/pio_usb_host/). The host should
- * see this device enumerate as a CDC ACM serial port — open it and
- * type; characters are echoed back.
- *
- * Native USB-C remains available for the Zephyr console / log output
- * (CONFIG_LOG_PRINTK), kept on stdio.
+ * Logs go out the native USB-C port via legacy USBD CDC ACM. This
+ * sample currently sacrifices the Link-side CDC ACM test endpoint to
+ * keep the bring-up triage simple.
  */
 
-#include <stdio.h>
-#include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/usb/udc.h>
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/ring_buffer.h>
-#include <zephyr/usb/usbd.h>
 
-LOG_MODULE_REGISTER(pio_usb_device_sample, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(pio_usb_device_sample, LOG_LEVEL_DBG);
 
-/* USBD device + descriptor declarations (USBD-next style — same as
- * Zephyr's upstream samples/subsys/usb/cdc_acm but pointing at our
- * Pico-PIO-USB UDC node instead of the native zephyr_udc0). */
+#define UDC_NODE DT_NODELABEL(pio_usb_device)
+#define CONSOLE_NODE DT_CHOSEN(zephyr_console)
 
-USBD_CONFIGURATION_DEFINE(config_1, USB_SCD_SELF_POWERED, 200);
-USBD_DESC_LANG_DEFINE(sample_lang);
-USBD_DESC_MANUFACTURER_DEFINE(sample_mfr, "Cosmos");
-USBD_DESC_PRODUCT_DEFINE(sample_product, "Lemon UDC PIO-USB Test");
-USBD_DESC_SERIAL_NUMBER_DEFINE(sample_sn, "0123456789AB");
+static const struct device *udc_dev = DEVICE_DT_GET(UDC_NODE);
+static const struct device *console = DEVICE_DT_GET(CONSOLE_NODE);
 
-USBD_DEVICE_DEFINE(sample_usbd,
-		   DEVICE_DT_GET(DT_NODELABEL(pio_usb_device)),
-		   /* VID/PID — placeholder; replace with your own when
-		    * shipping a real product. */
-		   0x2fe3, 0x0003);
-
-#define ECHO_RING_BUF_SIZE 1024
-static uint8_t ring_storage[ECHO_RING_BUF_SIZE];
-static struct ring_buf ringbuf;
-
-static const struct device *const cdc_dev =
-	DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0));
-
-static void cdc_irq_handler(const struct device *dev, void *user_data)
+static void wait_for_console(void)
 {
-	ARG_UNUSED(user_data);
-
-	while (uart_irq_update(dev) && uart_irq_is_pending(dev)) {
-		if (uart_irq_rx_ready(dev)) {
-			uint8_t buf[64];
-			size_t len = MIN(ring_buf_space_get(&ringbuf), sizeof(buf));
-			int n = uart_fifo_read(dev, buf, len);
-			if (n > 0) {
-				(void)ring_buf_put(&ringbuf, buf, n);
-				uart_irq_tx_enable(dev);
-			}
+	uint32_t dtr = 0;
+	for (int i = 0; i < 30; i++) {
+		printk("wfc i=%d dtr=%u\n", i, dtr);
+		uart_line_ctrl_get(console, UART_LINE_CTRL_DTR, &dtr);
+		if (dtr) {
+			break;
 		}
-		if (uart_irq_tx_ready(dev)) {
-			uint8_t buf[64];
-			int n = ring_buf_get(&ringbuf, buf, sizeof(buf));
-			if (n <= 0) {
-				uart_irq_tx_disable(dev);
-				continue;
-			}
-			(void)uart_fifo_fill(dev, buf, n);
-		}
+		k_msleep(100);
 	}
+	k_msleep(200);
 }
 
-static int enable_usbd(void)
+static int udc_event(const struct device *dev,
+		     const struct udc_event *const evt)
 {
-	int ret;
-
-	ret = usbd_add_descriptor(&sample_usbd, &sample_lang);
-	if (ret) return ret;
-	ret = usbd_add_descriptor(&sample_usbd, &sample_mfr);
-	if (ret) return ret;
-	ret = usbd_add_descriptor(&sample_usbd, &sample_product);
-	if (ret) return ret;
-	ret = usbd_add_descriptor(&sample_usbd, &sample_sn);
-	if (ret) return ret;
-	ret = usbd_add_configuration(&sample_usbd, &config_1);
-	if (ret) return ret;
-
-	ret = usbd_register_class(&sample_usbd, "cdc_acm_0", 1);
-	if (ret) return ret;
-
-	ret = usbd_init(&sample_usbd);
-	if (ret) return ret;
-	return usbd_enable(&sample_usbd);
+	ARG_UNUSED(dev);
+	switch (evt->type) {
+	case UDC_EVT_VBUS_READY:    LOG_INF("VBUS ready"); break;
+	case UDC_EVT_VBUS_REMOVED:  LOG_INF("VBUS removed"); break;
+	case UDC_EVT_RESET:         LOG_INF("Bus reset"); break;
+	case UDC_EVT_SOF:           /* too noisy to log */ break;
+	case UDC_EVT_SUSPEND:       LOG_INF("Bus suspend"); break;
+	case UDC_EVT_RESUME:        LOG_INF("Bus resume"); break;
+	case UDC_EVT_EP_REQUEST:    LOG_INF("EP request"); break;
+	case UDC_EVT_ERROR:         LOG_WRN("Error"); break;
+	default:                    LOG_DBG("UDC event %d", evt->type); break;
+	}
+	return 0;
 }
 
 int main(void)
 {
 	int ret;
 
-	LOG_INF("Pico-PIO-USB device sample starting");
+	printk("\n*** UDC_MAIN_START ***\n");
+	wait_for_console();
+	printk("*** wait_for_console done ***\n");
 
-	ring_buf_init(&ringbuf, sizeof(ring_storage), ring_storage);
+	LOG_INF("Pico-PIO-USB device sample (triage) starting");
 
-	if (!device_is_ready(cdc_dev)) {
-		LOG_ERR("CDC ACM device not ready");
+	if (!device_is_ready(udc_dev)) {
+		LOG_ERR("UDC device %s not ready", udc_dev->name);
 		return -ENODEV;
 	}
+	LOG_INF("UDC device %s present", udc_dev->name);
 
-	ret = enable_usbd();
+	ret = udc_init(udc_dev, udc_event);
 	if (ret) {
-		LOG_ERR("USBD enable failed: %d", ret);
+		LOG_ERR("udc_init failed: %d", ret);
 		return ret;
 	}
+	LOG_INF("udc_init OK");
 
-	uart_irq_callback_set(cdc_dev, cdc_irq_handler);
-	uart_irq_rx_enable(cdc_dev);
+	ret = udc_enable(udc_dev);
+	if (ret) {
+		LOG_ERR("udc_enable failed: %d", ret);
+		return ret;
+	}
+	LOG_INF("UDC enabled — Link USB-C port should now signal as USB-FS device");
 
-	LOG_INF("UDC enabled — Link USB-C port now exposes a CDC ACM device");
-
+	uint32_t tick = 0;
 	while (1) {
-		k_msleep(1000);
+		LOG_INF("alive t=%us", tick * 2);
+		tick++;
+		k_msleep(2000);
 	}
 	return 0;
 }

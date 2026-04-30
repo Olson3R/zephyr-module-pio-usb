@@ -21,12 +21,19 @@
 		data-rate = "full-speed";
 		status = "okay";
 	};
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
+	};
 };
 
-/* CDC ACM endpoint child node — Zephyr's USBD CDC ACM class searches
- * for nodes with this compatible to instantiate a UART instance. The
- * label `cdc_acm_uart0` is what the sample's main.c references. */
-&pio_usb_device {
+/* Triage build: native USB-C exposes a CDC ACM serial console via the
+ * legacy USB device stack (so we get logs out of the firmware). The
+ * Link USB-C port runs udc_pio_usb but exposes no class — the
+ * standalone-PIO-USB-init smoke test is sufficient until USBD-next +
+ * CDC ACM dual-stack issues are resolved. */
+&zephyr_udc0 {
 	cdc_acm_uart0: cdc_acm_uart0 {
 		compatible = "zephyr,cdc-acm-uart";
 	};
