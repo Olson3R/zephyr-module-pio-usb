@@ -373,12 +373,14 @@ static int kick_off_xfer(struct uhc_pio_usb_inflight *slot,
 			}
 			break;
 		case UHC_CONTROL_STAGE_STATUS:
-			/* STATUS is a zero-length transfer in the opposite
-			 * direction from DATA (or IN if no DATA stage). */
+			/* STATUS is a zero-length transfer; the caller picks
+			 * the direction by setting xfer->ep to USB_CONTROL_EP_IN
+			 * (0x80) for OUT-direction control transfers, or
+			 * USB_CONTROL_EP_OUT (0x00) for IN-direction control
+			 * transfers. We just pass it through. */
+			printk("[uhc] sending STATUS ZLP ep=0x%02x\n", xfer->ep);
 			if (!pio_usb_host_endpoint_transfer(
-				    0, slot->dev_addr,
-				    USB_EP_DIR_IS_IN(xfer->ep) ? 0x00 : 0x80,
-				    NULL, 0)) {
+				    0, slot->dev_addr, xfer->ep, NULL, 0)) {
 				return -EIO;
 			}
 			break;
@@ -404,24 +406,32 @@ static int kick_off_xfer(struct uhc_pio_usb_inflight *slot,
 static void process_pending_xfers(const struct device *dev,
 				  struct uhc_pio_usb_data_priv *priv)
 {
-	struct uhc_transfer *xfer;
-	while ((xfer = uhc_xfer_get_next(dev)) != NULL) {
-		struct uhc_pio_usb_inflight *slot = slot_for_xfer(priv, xfer);
+	/* uhc_xfer_get_next is peek-only — it never removes the xfer from
+	 * the queue (uhc_xfer_return does that on completion). So we can't
+	 * loop here: once we kick the head xfer off and mark slot->started,
+	 * the next call would return the same xfer and we'd spin forever.
+	 * One xfer per driver-thread tick is fine: the next tick will pick
+	 * up any further pending xfers. */
+	struct uhc_transfer *xfer = uhc_xfer_get_next(dev);
+	if (xfer == NULL) {
+		return;
+	}
+
+	struct uhc_pio_usb_inflight *slot = slot_for_xfer(priv, xfer);
+	if (slot == NULL) {
+		slot = slot_alloc(priv, xfer);
 		if (slot == NULL) {
-			slot = slot_alloc(priv, xfer);
-			if (slot == NULL) {
-				LOG_WRN("inflight table full, deferring xfer");
-				return;
-			}
+			LOG_WRN("inflight table full, deferring xfer");
+			return;
 		}
-		if (slot->started) {
-			continue;
-		}
-		int ret = kick_off_xfer(slot, xfer);
-		if (ret) {
-			uhc_xfer_return(dev, xfer, ret);
-			slot_free(slot);
-		}
+	}
+	if (slot->started) {
+		return;
+	}
+	int ret = kick_off_xfer(slot, xfer);
+	if (ret) {
+		uhc_xfer_return(dev, xfer, ret);
+		slot_free(slot);
 	}
 }
 
@@ -433,7 +443,8 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	uint32_t loop_count = 0;
+	uint32_t one_shot_remaining = 0;
+	bool prev_any_started = false;
 	while (!priv->stop) {
 		/* Wait at most 1 ms — long enough to behave like the
 		 * upstream SOF cadence, short enough to react to ep_enqueue
@@ -444,10 +455,14 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		/* Print on every iteration once any transfer has been kicked
-		 * off so we can see exactly which call hangs the loop, and
-		 * a heartbeat every 50 ticks otherwise. */
-		endpoint_t *e0 = PIO_USB_ENDPOINT(0);
+		/* One-shot probe: when slot->started flips from false to
+		 * true (i.e. we just queued the first transfer of a chain),
+		 * arm a tiny burst (frame_in, frame_out) bracket on the
+		 * next few frame() calls. Lets us see whether
+		 * pio_usb_host_frame() hangs pumping the queued
+		 * transaction. Per-iteration printing is OFF — even small
+		 * lines at 1 ms cadence overflow the deferred log buffer
+		 * (or back-pressure CDC ACM in IMMEDIATE mode). */
 		bool any_started = false;
 		for (size_t i = 0; i < ARRAY_SIZE(priv->inflight); i++) {
 			if (priv->inflight[i].started) {
@@ -455,28 +470,18 @@ static void uhc_pio_usb_thread(void *p1, void *p2, void *p3)
 				break;
 			}
 		}
-		bool probe = any_started || ((loop_count % 50) == 0);
-		if (probe) {
-			printk("[uhc] iter=%u t=%u ints=0x%x epc=0x%x epe=0x%x ep0(s=%u n=0x%02x d=0x%02x h=%u st=%u f=%u)\n",
-			       loop_count, timer_hw->timerawl,
-			       root->ints, root->ep_complete, root->ep_error,
-			       e0->size, e0->ep_num, e0->data_id,
-			       e0->has_transfer, e0->transfer_started,
-			       e0->failed_count);
+		if (any_started && !prev_any_started) {
+			one_shot_remaining = 3;
 		}
-		loop_count++;
+		prev_any_started = any_started;
 
-		/* Pico-PIO-USB normally calls pio_usb_host_frame() from its
-		 * SOF timer; since we set skip_alarm_pool=true, we drive it
-		 * here. This sends SOF, processes queued endpoint
-		 * transactions, runs the connection-check pass, and invokes
-		 * pio_usb_host_irq_handler for any flagged root ports. */
-		if (probe) {
-			printk("[uhc] frame_in\n");
+		if (one_shot_remaining > 0) {
+			printk("[uhc] frame_in n=%u\n", one_shot_remaining);
 		}
 		pio_usb_host_frame();
-		if (probe) {
-			printk("[uhc] frame_out\n");
+		if (one_shot_remaining > 0) {
+			printk("[uhc] frame_out n=%u\n", one_shot_remaining);
+			one_shot_remaining--;
 		}
 
 		/* Surface connect/disconnect and per-endpoint completions
