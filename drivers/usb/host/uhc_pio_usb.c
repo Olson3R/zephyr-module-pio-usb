@@ -287,8 +287,76 @@ static void surface_root_events(const struct device *dev,
 	}
 }
 
+/* Kick the wire transaction for the current xfer->stage. For control
+ * transfers, xfer->ep encodes the DATA direction (USB_CONTROL_EP_IN /
+ * _OUT); STATUS direction is implied as the opposite. */
+static int kick_stage(struct uhc_pio_usb_inflight *slot,
+		      struct uhc_transfer *xfer)
+{
+	printk("[uhc] kick dev=%u ep=0x%02x stage=%u\n",
+	       slot->dev_addr, xfer->ep, xfer->stage);
+	if (!ensure_endpoint_open(slot, xfer)) {
+		printk("[uhc] endpoint_open FAILED\n");
+		return -EIO;
+	}
+
+	uint8_t ep_idx = xfer->ep & 0x0f;
+	if (ep_idx == 0) {
+		switch (xfer->stage) {
+		case UHC_CONTROL_STAGE_SETUP:
+			if (!pio_usb_host_send_setup(0, slot->dev_addr,
+						     xfer->setup_pkt)) {
+				return -EIO;
+			}
+			break;
+		case UHC_CONTROL_STAGE_DATA:
+			if (!pio_usb_host_endpoint_transfer(
+				    0, slot->dev_addr, xfer->ep,
+				    xfer->buf ? xfer->buf->data : NULL,
+				    xfer->buf
+					    ? (USB_EP_DIR_IS_IN(xfer->ep)
+						       ? net_buf_tailroom(xfer->buf)
+						       : xfer->buf->len)
+					    : 0)) {
+				return -EIO;
+			}
+			break;
+		case UHC_CONTROL_STAGE_STATUS: {
+			/* STATUS is opposite of DATA direction. xfer->ep
+			 * still carries the DATA direction here; we flip
+			 * it for the wire. */
+			uint8_t status_ep = USB_EP_DIR_IS_IN(xfer->ep)
+						    ? USB_CONTROL_EP_OUT
+						    : USB_CONTROL_EP_IN;
+			if (!pio_usb_host_endpoint_transfer(
+				    0, slot->dev_addr, status_ep, NULL, 0)) {
+				return -EIO;
+			}
+			break;
+		}
+		}
+	} else {
+		/* Bulk / interrupt — single transaction. */
+		uint8_t *buf = xfer->buf ? xfer->buf->data : NULL;
+		uint16_t len = xfer->buf
+				       ? (USB_EP_DIR_IS_IN(xfer->ep)
+						  ? net_buf_tailroom(xfer->buf)
+						  : xfer->buf->len)
+				       : 0;
+		if (!pio_usb_host_endpoint_transfer(0, slot->dev_addr,
+						    xfer->ep, buf, len)) {
+			return -EIO;
+		}
+	}
+
+	slot->started = true;
+	return 0;
+}
+
 /* Find the in-flight slot whose Pico-PIO-USB endpoint matches a flagged
- * EP pool index, then surface a UHC completion. */
+ * EP pool index. For control endpoints, advance the stage and kick the
+ * next transaction; only signal completion when the entire control
+ * transfer is done. For bulk, signal completion immediately. */
 static void drain_endpoint_bitmap(const struct device *dev,
 				  struct uhc_pio_usb_data_priv *priv,
 				  volatile uint32_t *ep_reg,
@@ -296,8 +364,7 @@ static void drain_endpoint_bitmap(const struct device *dev,
 {
 	uint32_t pending = *ep_reg;
 	if (pending) {
-		printk("[uhc] drain_endpoint_bitmap pending=0x%08x err=%d\n",
-		       pending, err);
+		printk("[uhc] drain pending=0x%x err=%d\n", pending, err);
 	}
 	*ep_reg &= ~pending;
 
@@ -323,84 +390,70 @@ static void drain_endpoint_bitmap(const struct device *dev,
 			continue;
 		}
 
-		/* Update buffer length on the xfer's net_buf if data came in
-		 * (control IN data or bulk IN). Pico-PIO-USB stores the
-		 * actual transferred length in ep->actual_len. */
-		if (err == 0 && match->xfer->buf != NULL &&
-		    USB_EP_DIR_IS_IN(match->xfer->ep)) {
-			net_buf_add(match->xfer->buf, ep->actual_len);
+		struct uhc_transfer *xfer = match->xfer;
+		bool finished = false;
+		bool is_control = (xfer->ep & 0x0f) == 0;
+
+		if (err) {
+			finished = true;
+		} else if (!is_control) {
+			/* Bulk/interrupt: single-transaction. Capture
+			 * IN length on success and we're done. */
+			if (xfer->buf != NULL && USB_EP_DIR_IS_IN(xfer->ep)) {
+				net_buf_add(xfer->buf, ep->actual_len);
+			}
+			finished = true;
+		} else {
+			/* Control: advance the stage. */
+			switch (xfer->stage) {
+			case UHC_CONTROL_STAGE_SETUP: {
+				/* DATA stage if the request actually carries
+				 * data (wLength>0 AND we have a buffer). */
+				uint16_t wlen =
+					sys_get_le16(&xfer->setup_pkt[6]);
+				if (xfer->buf != NULL && wlen != 0) {
+					xfer->stage = UHC_CONTROL_STAGE_DATA;
+				} else {
+					xfer->stage = UHC_CONTROL_STAGE_STATUS;
+				}
+				int ret = kick_stage(match, xfer);
+				if (ret) {
+					err = ret;
+					finished = true;
+				}
+				break;
+			}
+			case UHC_CONTROL_STAGE_DATA: {
+				if (xfer->buf != NULL &&
+				    USB_EP_DIR_IS_IN(xfer->ep)) {
+					net_buf_add(xfer->buf,
+						    ep->actual_len);
+				}
+				xfer->stage = UHC_CONTROL_STAGE_STATUS;
+				int ret = kick_stage(match, xfer);
+				if (ret) {
+					err = ret;
+					finished = true;
+				}
+				break;
+			}
+			case UHC_CONTROL_STAGE_STATUS:
+				finished = true;
+				break;
+			}
 		}
 
-		uhc_xfer_return(dev, match->xfer, err);
-		slot_free(match);
+		if (finished) {
+			uhc_xfer_return(dev, xfer, err);
+			slot_free(match);
+		}
 	}
 }
 
 static int kick_off_xfer(struct uhc_pio_usb_inflight *slot,
 			 struct uhc_transfer *xfer)
 {
-	printk("[uhc] kick_off_xfer dev=%u ep=0x%02x stage=%u\n",
-	       slot->dev_addr, slot->ep_addr, xfer->stage);
-	if (!ensure_endpoint_open(slot, xfer)) {
-		printk("[uhc] ensure_endpoint_open FAILED\n");
-		return -EIO;
-	}
-	printk("[uhc] endpoint open OK\n");
-
-	uint8_t ep_idx = xfer->ep & 0x0f;
-	if (ep_idx == 0) {
-		/* Control transfer — stage tells us whether to send SETUP
-		 * or chase the data/status. UHC layer drives stage
-		 * advancement; we just emit the right packet for the
-		 * current stage. */
-		switch (xfer->stage) {
-		case UHC_CONTROL_STAGE_SETUP:
-			printk("[uhc] sending SETUP packet\n");
-			if (!pio_usb_host_send_setup(0, slot->dev_addr,
-						     xfer->setup_pkt)) {
-				printk("[uhc] pio_usb_host_send_setup FAILED\n");
-				return -EIO;
-			}
-			printk("[uhc] SETUP queued\n");
-			break;
-		case UHC_CONTROL_STAGE_DATA:
-			if (!pio_usb_host_endpoint_transfer(
-				    0, slot->dev_addr, xfer->ep,
-				    xfer->buf ? xfer->buf->data : NULL,
-				    xfer->buf ? net_buf_tailroom(xfer->buf)
-					      : 0)) {
-				return -EIO;
-			}
-			break;
-		case UHC_CONTROL_STAGE_STATUS:
-			/* STATUS is a zero-length transfer; the caller picks
-			 * the direction by setting xfer->ep to USB_CONTROL_EP_IN
-			 * (0x80) for OUT-direction control transfers, or
-			 * USB_CONTROL_EP_OUT (0x00) for IN-direction control
-			 * transfers. We just pass it through. */
-			printk("[uhc] sending STATUS ZLP ep=0x%02x\n", xfer->ep);
-			if (!pio_usb_host_endpoint_transfer(
-				    0, slot->dev_addr, xfer->ep, NULL, 0)) {
-				return -EIO;
-			}
-			break;
-		}
-	} else {
-		/* Bulk / interrupt — single transaction. */
-		uint8_t *buf = xfer->buf ? xfer->buf->data : NULL;
-		uint16_t len = xfer->buf
-				       ? (USB_EP_DIR_IS_IN(xfer->ep)
-						  ? net_buf_tailroom(xfer->buf)
-						  : xfer->buf->len)
-				       : 0;
-		if (!pio_usb_host_endpoint_transfer(0, slot->dev_addr,
-						    xfer->ep, buf, len)) {
-			return -EIO;
-		}
-	}
-
-	slot->started = true;
-	return 0;
+	return kick_stage(slot, xfer);
 }
 
 static void process_pending_xfers(const struct device *dev,
