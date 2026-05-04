@@ -13,6 +13,7 @@ Phase 2 of the [Cosmos Lemon Wired ZMK roadmap](https://github.com/rianadon/Cosm
 | `uhc_pio_usb` (host) | Released, hardware-tested | Pico-PIO-USB **host stack** (`pio_usb_host_*`) |
 | `udc_pio_usb` (device) | Released | Pico-PIO-USB **LL layer** (`pio_usb_ll_*`) directly |
 | `samples/pio_usb_host/` | Released | Standalone UHC bring-up sample |
+| `samples/pio_usb_host_descriptor/` | Released | UHC sample — enumerates the attached device and dumps its device descriptor + manufacturer/product/serial strings to CDC ACM (mirrors tinyusb's `dual/host_info_to_device_cdc`) |
 | `samples/pio_usb_device/` | Released | Standalone UDC bring-up sample |
 
 ## Architecture

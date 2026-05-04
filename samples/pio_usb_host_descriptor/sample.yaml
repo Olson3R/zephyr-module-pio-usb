@@ -1,0 +1,12 @@
+sample:
+  name: Pico-PIO-USB UHC device-descriptor dump
+  description: |
+    Brings up uhc_pio_usb on a Lemon Wired (or any RP2040 board), enumerates
+    the device plugged into the configured Link USB-C port (bus reset,
+    SET_ADDRESS, GET_DESCRIPTOR), and prints the device descriptor and
+    manufacturer/product/serial-number strings to CDC ACM on the native
+    USB-C port. Modeled after tinyusb's dual/host_info_to_device_cdc.
+tests:
+  sample.zephyr-module-pio-usb.host_descriptor:
+    platform_allow: cosmos_lemon_wired rpi_pico
+    tags: usb pio

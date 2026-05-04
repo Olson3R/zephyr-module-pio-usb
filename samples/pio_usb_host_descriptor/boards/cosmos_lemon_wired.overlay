@@ -1,0 +1,38 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Lemon Wired overlay for the UHC descriptor-dump sample. Same wiring as
+ * samples/pio_usb_host: the Link USB-C port (D+ on GP0, D- on GP1) drives
+ * Pico-PIO-USB; the native USB-C port stays on &usbd for the CDC ACM
+ * serial console.
+ *
+ * &uart0 owns GP0/GP1 by default for the wired-split transport — disable
+ * it here so Pico-PIO-USB can take the pins.
+ */
+
+&uart0 {
+	status = "disabled";
+};
+
+/ {
+	pio_usb_host: pio_usb_host {
+		compatible = "raspberrypi,pio-usb-host";
+		pin-dp = <0>;
+		pinout = "dpdm";
+		data-rate = "full-speed";
+		status = "okay";
+	};
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
+	};
+};
+
+/* CDC ACM serial console exposed on the native USB-C port (RP2040's
+ * hardware USB block — board's `zephyr_udc0`). */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
