@@ -1,0 +1,59 @@
+# Self-importing manifest so this module can be built standalone via
+# `west init -l` (i.e. `git clone … && west init -l . && west update`).
+# When this module is consumed by another workspace (e.g. ZMK), the
+# consuming manifest's `west.yml` takes precedence and this file is
+# ignored.
+#
+# Pinned set:
+#   - zephyr: ZMK's fork (v3.5.0+zmk-fixes) — the same baseline used by
+#     downstream Lemon Wired builds. Mainline Zephyr v3.5+ has the UHC/UDC
+#     APIs the drivers depend on, but we pin a known-tested revision so
+#     `west update` is reproducible.
+#   - Pico-PIO-USB: post-0.7.2 commit that includes the SET_ADDRESS
+#     handshake-timing fix (see README "How to consume" for the rationale).
+
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: sekigon-gonnoc
+      url-base: https://github.com/sekigon-gonnoc
+
+  projects:
+    - name: zephyr
+      remote: zmkfirmware
+      revision: v3.5.0+zmk-fixes
+      clone-depth: 1
+      import:
+        # Pull in only the HALs we actually need on RP2040 — Zephyr's
+        # default west.yml imports every vendor HAL otherwise.
+        name-blocklist:
+          - ci-tools
+          - hal_altera
+          - hal_cypress
+          - hal_infineon
+          - hal_microchip
+          - hal_nxp
+          - hal_openisa
+          - hal_silabs
+          - hal_xtensa
+          - hal_st
+          - hal_ti
+          - loramac-node
+          - mcuboot
+          - mcumgr
+          - net-tools
+          - openthread
+          - edtt
+          - trusted-firmware-m
+
+    - name: Pico-PIO-USB
+      remote: sekigon-gonnoc
+      revision: 675543bcc9baa8170f868ab7ba316d418dbcf41f
+      path: modules/lib/pico-pio-usb
+
+  # No `self:` block — when this module is used as the manifest project
+  # (`west init -l .`), the workspace root *is* the repo and samples
+  # build via e.g. `west build -b … samples/pio_usb_host`. When consumed
+  # by another workspace, the consuming manifest sets the path (see the
+  # `path: modules/lib/zephyr-pio-usb` snippet in this repo's README).

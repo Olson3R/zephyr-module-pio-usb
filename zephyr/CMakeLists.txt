@@ -5,18 +5,37 @@ if(NOT (CONFIG_UHC_PIO_USB OR CONFIG_UDC_PIO_USB))
   return()
 endif()
 
-# Pico-PIO-USB upstream sources live alongside this wrapper in
-# modules/lib/pico-pio-usb (pulled in by west). It doesn't ship a
+# Pico-PIO-USB upstream sources are pulled in by west. It doesn't ship a
 # zephyr/module.yml, so it's not visible via the standard
-# ZEPHYR_<MOD>_MODULE_DIR variable — we resolve its path relative to this
-# wrapper's location instead. The .pio.h files are pre-generated and
-# shipped in src/ so we don't need pioasm.
-set(PIO_USB_DIR ${CMAKE_CURRENT_LIST_DIR}/../../pico-pio-usb/src)
-if(NOT EXISTS ${PIO_USB_DIR}/pio_usb.h)
+# ZEPHYR_<MOD>_MODULE_DIR variable. Resolve its location either:
+#   - via -DPIO_USB_DIR=… on the command line (override), or
+#   - by searching a list of common workspace-relative paths.
+# The .pio.h files are pre-generated and shipped in src/, so we don't
+# need pioasm.
+if(NOT DEFINED PIO_USB_DIR)
+  # Candidate locations, in priority order:
+  #   1. Sibling layout (rainadon-zmk consumer): this module at
+  #      modules/lib/zephyr-pio-usb, pico-pio-usb at modules/lib/pico-pio-usb.
+  #   2. Standalone layout (`west init -l .` on this repo): this module is
+  #      the manifest project at the workspace root, pico-pio-usb at
+  #      modules/lib/pico-pio-usb relative to it.
+  set(_pio_usb_candidates
+    ${CMAKE_CURRENT_LIST_DIR}/../../pico-pio-usb/src
+    ${CMAKE_CURRENT_LIST_DIR}/../modules/lib/pico-pio-usb/src
+    ${CMAKE_CURRENT_LIST_DIR}/../../modules/lib/pico-pio-usb/src
+  )
+  foreach(_candidate ${_pio_usb_candidates})
+    if(EXISTS ${_candidate}/pio_usb.h)
+      set(PIO_USB_DIR ${_candidate})
+      break()
+    endif()
+  endforeach()
+endif()
+if(NOT PIO_USB_DIR OR NOT EXISTS ${PIO_USB_DIR}/pio_usb.h)
   message(FATAL_ERROR
-    "Pico-PIO-USB upstream not found at ${PIO_USB_DIR}. "
-    "Is sekigon-gonnoc/Pico-PIO-USB declared at modules/lib/pico-pio-usb "
-    "in your west manifest?")
+    "Pico-PIO-USB upstream not found. Searched: ${_pio_usb_candidates}. "
+    "Either declare sekigon-gonnoc/Pico-PIO-USB at modules/lib/pico-pio-usb "
+    "in your west manifest, or pass -DPIO_USB_DIR=/abs/path/to/pico-pio-usb/src.")
 endif()
 zephyr_include_directories(${PIO_USB_DIR})
 

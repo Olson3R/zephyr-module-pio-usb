@@ -1,0 +1,40 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Raspberry Pi Pico overlay for the UHC descriptor-dump sample. PIO-USB
+ * drives D+/D- on GP0/GP1 (Pico-PIO-USB convention); the native USB
+ * block stays on &zephyr_udc0 for the CDC ACM serial console.
+ *
+ * Wire D+ to GP0 and D- to GP1 — typically through a USB-C breakout, a
+ * downstream USB-A jack, or directly to a known USB-FS device.
+ *
+ * &uart0 owns GP0/GP1 by default — disable it here so PIO-USB can
+ * take the pins.
+ */
+
+&uart0 {
+	status = "disabled";
+};
+
+/ {
+	pio_usb_host: pio_usb_host {
+		compatible = "raspberrypi,pio-usb-host";
+		pin-dp = <0>;
+		pinout = "dpdm";
+		data-rate = "full-speed";
+		status = "okay";
+	};
+
+	chosen {
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
+	};
+};
+
+/* CDC ACM serial console exposed on the native USB-B port (RP2040's
+ * hardware USB block — board's `zephyr_udc0`). */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
