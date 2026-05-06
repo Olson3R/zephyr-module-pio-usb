@@ -46,7 +46,16 @@ static const struct device *uhc_dev = DEVICE_DT_GET(UHC_NODE);
 static const struct device *console = DEVICE_DT_GET(CONSOLE_NODE);
 
 #define ENUM_ADDR  1
-#define DEFAULT_MPS0 8
+/* MPS the EP0 slot is opened with for the very first GET_DESCRIPTOR
+ * (before bMaxPacketSize0 is known). Use the FS maximum 64, NOT the
+ * USB-spec-allowed minimum 8 — pico-pio-usb's RX state machine is sized
+ * by the slot's MPS, and a device sending a DATA0 packet larger than
+ * the slot's MPS gets dropped silently (no ep_complete, no ep_error,
+ * no ep_stalled — just an infinite NAK/retry loop until the
+ * application gives up). Any real FS device will have MPS0 ≤ 64, so
+ * starting at 64 always works; the actual value gets picked up from
+ * bMaxPacketSize0 in the response and used for subsequent transfers. */
+#define DEFAULT_MPS0 64
 #define DESC_BUF_SIZE 256
 
 /* Net-buf pool for the descriptor DATA stages. uhc_pio_usb does not
