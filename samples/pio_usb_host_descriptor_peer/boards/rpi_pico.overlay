@@ -1,0 +1,15 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Raspberry Pi Pico overlay for the descriptor-dump test peer. Native
+ * USB-B (the Pico's hardware USB block) carries the CDC ACM device the
+ * paired host enumerates. PIO-USB / Link wiring is not used here — the
+ * peer is purely a USB device on the native port.
+ */
+
+&zephyr_udc0 {
+	status = "okay";
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

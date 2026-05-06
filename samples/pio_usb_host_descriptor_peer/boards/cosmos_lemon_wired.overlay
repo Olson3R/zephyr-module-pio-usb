@@ -1,0 +1,17 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Lemon Wired overlay for the descriptor-dump test peer. The native
+ * USB-C port (the RP2040's hardware USB block) carries the CDC ACM
+ * device the paired host enumerates. The Link USB-C port (GP0/GP1
+ * PIO-USB) is unused on the peer — connect a cable from the host's
+ * Link USB-C to *this board's native USB-C* for the host's enumeration
+ * to see this peer.
+ */
+
+&zephyr_udc0 {
+	status = "okay";
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

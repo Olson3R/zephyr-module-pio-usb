@@ -1,0 +1,12 @@
+sample:
+  name: Pico-PIO-USB UHC descriptor-dump test peer
+  description: |
+    Native-USB CDC ACM device with a fixed VID/PID/strings, intended as
+    the device-side companion to samples/pio_usb_host_descriptor. Flash
+    this on a second board, connect its native USB-C to the host's Link
+    USB-C, and the host's descriptor dump should match the "Expected
+    output" block in pio_usb_host_descriptor/README.md exactly.
+tests:
+  sample.zephyr-module-pio-usb.host_descriptor_peer:
+    platform_allow: cosmos_lemon_wired rpi_pico
+    tags: usb pio
