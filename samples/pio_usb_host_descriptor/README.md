@@ -13,15 +13,17 @@ connect/disconnect events), see
 
 ## Hardware
 
-- An RP2040 board with two USB-C ports (or any board with a
-  `raspberrypi,pio-usb-host` DT node). The default board overlay
-  targets the [Cosmos Lemon
-  Wired](https://ryanis.cool/cosmos/lemon/), which puts D+/D- on
-  `GP0`/`GP1`.
-- Any USB-FS device with a device descriptor (a flash drive, mouse,
-  keyboard) plugged into the Link USB-C port.
-- Native USB-C plugged into your computer for the CDC ACM serial
-  console.
+- A Raspberry Pi Pico (or any RP2040 board). The
+  [`boards/rpi_pico.overlay`](boards/rpi_pico.overlay) puts PIO-USB on
+  `GP0` (D+) / `GP1` (D-) and the CDC ACM console on the Pico's native
+  USB-B port. A
+  [`boards/cosmos_lemon_wired.overlay`](boards/cosmos_lemon_wired.overlay)
+  is also provided for the [Cosmos Lemon
+  Wired](https://ryanis.cool/cosmos/lemon/).
+- A USB-FS device with a device descriptor — a flash drive, mouse,
+  keyboard — wired to GP0/GP1 (typically through a USB-A or USB-C
+  breakout jack).
+- Native USB plugged into your computer for the CDC ACM serial console.
 
 ## Build
 
@@ -40,13 +42,23 @@ Then build (from the workspace root, i.e. the directory containing
 `.west/`):
 
 ```bash
-west build -b cosmos_lemon_wired samples/pio_usb_host_descriptor
+west build -b rpi_pico samples/pio_usb_host_descriptor
+```
+
+For the Cosmos Lemon Wired (board definition lives in the
+[`Olson3R/rainadon-zmk`](https://github.com/Olson3R/rainadon-zmk) ZMK
+fork — clone it next to this repo and pass its `app/` as
+`-DBOARD_ROOT=…`):
+
+```bash
+west build -b cosmos_lemon_wired samples/pio_usb_host_descriptor \
+  -- -DBOARD_ROOT=/path/to/rainadon-zmk/app
 ```
 
 If you'd rather consume this module from your own application's
 manifest (e.g. a ZMK fork), see [the top-level
 README](../../README.md#how-to-consume) for the entries to add — once
-in place, the `west build` invocation above is the same.
+in place, the `west build` invocation is the same.
 
 To target a different board, supply `-b <your-board>` and place a
 matching `boards/<your-board>.overlay` in this directory.

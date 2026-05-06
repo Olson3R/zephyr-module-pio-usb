@@ -14,16 +14,18 @@ legacy USBD CDC ACM. For a UHC test on the same board family, see
 
 ## Hardware
 
-- An RP2040 board with two USB-C ports (or any board with a
-  `raspberrypi,pio-usb-device` DT node). The default board overlay
-  targets the [Cosmos Lemon
-  Wired](https://ryanis.cool/cosmos/lemon/), which puts D+/D- on
-  `GP0`/`GP1`.
-- Native USB-C plugged into your computer for the CDC ACM serial
-  console.
-- (Optional, end-to-end test) A second board running
-  [`pio_usb_host`](../pio_usb_host/README.md), with a USB-C cable
-  between the two boards' Link ports.
+- A Raspberry Pi Pico (or any RP2040 board). The
+  [`boards/rpi_pico.overlay`](boards/rpi_pico.overlay) puts PIO-USB on
+  `GP0` (D+) / `GP1` (D-) and the CDC ACM console on the Pico's native
+  USB-B port. A
+  [`boards/cosmos_lemon_wired.overlay`](boards/cosmos_lemon_wired.overlay)
+  is also provided for the [Cosmos Lemon
+  Wired](https://ryanis.cool/cosmos/lemon/).
+- Native USB plugged into your computer for the CDC ACM serial console.
+- A USB-A or USB-C jack wired to GP0/GP1 so a host PC can plug into
+  the PIO-USB side. Or, for the end-to-end test below, a second board
+  running [`pio_usb_host`](../pio_usb_host/README.md) with its own
+  GP0/GP1 wired to the same jack via a USB cable.
 
 ## Build
 
@@ -42,13 +44,23 @@ Then build (from the workspace root, i.e. the directory containing
 `.west/`):
 
 ```bash
-west build -b cosmos_lemon_wired samples/pio_usb_device
+west build -b rpi_pico samples/pio_usb_device
+```
+
+For the Cosmos Lemon Wired (board definition lives in the
+[`Olson3R/rainadon-zmk`](https://github.com/Olson3R/rainadon-zmk) ZMK
+fork — clone it next to this repo and pass its `app/` as
+`-DBOARD_ROOT=…`):
+
+```bash
+west build -b cosmos_lemon_wired samples/pio_usb_device \
+  -- -DBOARD_ROOT=/path/to/rainadon-zmk/app
 ```
 
 If you'd rather consume this module from your own application's
 manifest (e.g. a ZMK fork), see [the top-level
 README](../../README.md#how-to-consume) for the entries to add — once
-in place, the `west build` invocation above is the same.
+in place, the `west build` invocation is the same.
 
 To target a different board, supply `-b <your-board>` and place a
 matching `boards/<your-board>.overlay` in this directory.
